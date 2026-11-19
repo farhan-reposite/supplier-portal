@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Supplier Portal – Log in</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="login">
+    <h1>Supplier Portal</h1>
+    <p class="hint">Log in to see your delivery schedule and download box labels.</p>
+    <div class="card">
+      <form id="form">
+        <div><label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" required></div>
+        <div><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required></div>
+        <div id="msg" class="msg err" hidden></div>
+        <button class="primary" style="width:100%" id="btn">Log in</button>
+      </form>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const go = (role) => { location.href = role === 'admin' ? '/admin.html' : '/app.html'; };
+    api('/api/me', { noRedirect: true }).then((me) => go(me.role)).catch(() => {});
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      try {
+        const r = await api('/api/login', { method: 'POST', noRedirect: true,
+          body: { username: document.getElementById('u').value, password: document.getElementById('p').value } });
+        go(r.role);
+      } catch (err) {
+        showMsg(document.getElementById('msg'), err.message, 'err');
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

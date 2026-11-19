@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Supplier Portal – Admin</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <strong>Supplier Portal · Admin</strong>
+    <span><span class="who" id="who"></span> &nbsp; <button class="small" onclick="logout()">Log out</button></span>
+  </div>
+  <main>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="suppliers" aria-selected="true">Suppliers</button>
+      <button role="tab" data-tab="upload" aria-selected="false">Upload schedule</button>
+      <button role="tab" data-tab="schedule" aria-selected="false">Schedule &amp; receiving</button>
+      <button role="tab" data-tab="downloads" aria-selected="false">Download log</button>
+    </div>
+    <div id="msg" class="msg err" hidden></div>
+
+    <!-- Suppliers -->
+    <section id="tab-suppliers">
+      <div class="card">
+        <h2>Add supplier</h2>
+        <div class="row">
+          <div style="flex:0 1 160px"><label for="s-code">Code (on label)</label><input id="s-code" placeholder="XXI" maxlength="20"></div>
+          <div><label for="s-name">Name</label><input id="s-name" placeholder="PT Example Supplier"></div>
+          <div class="fit"><button class="primary" id="s-add">Add supplier</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Add login for a supplier</h2>
+        <div class="row">
+          <div><label for="u-supplier">Supplier</label><select id="u-supplier"></select></div>
+          <div><label for="u-name">Username</label><input id="u-name" autocapitalize="none" placeholder="xxi.warehouse"></div>
+          <div><label for="u-pass">Password (min 8)</label><input id="u-pass" type="text" autocomplete="off"></div>
+          <div class="fit"><button class="primary" id="u-add">Create login</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Suppliers</h2>
+        <div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Logins</th><th>Status</th></tr></thead>
+          <tbody id="sup-body"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section id="tab-upload" hidden>
+      <div class="card">
+        <h2>Upload delivery schedule</h2>
+        <p class="hint">Excel columns: supplier_code, delivery_date, po_no, part_no, part_name, qty_per_box, boxes. Uploading a date again replaces its lines that have not been received yet.</p>
+        <div class="row">
+          <div class="fit"><button id="tpl">Download template</button></div>
+          <div><label for="file">Excel file (.xlsx)</label><input id="file" type="file" accept=".xlsx,.xls,.csv"></div>
+        </div>
+        <div id="up-msg" class="msg" hidden></div>
+        <div id="preview"></div>
+        <button class="primary" id="up-go" hidden>Upload schedule</button>
+      </div>
+    </section>
+
+    <!-- Schedule -->
+    <section id="tab-schedule" hidden>
+      <div class="card">
+        <div class="row">
+          <div style="flex:0 1 180px"><label for="f-from">From date</label><input id="f-from" type="date"></div>
+          <div style="flex:0 1 240px"><label for="f-supplier">Supplier</label><select id="f-supplier"></select></div>
+          <div class="fit"><button id="f-go">Show</button></div>
+        </div>
+        <p class="hint">Enter the quantity actually received and press Save. Anything below the scheduled total shows as a shortage to the supplier.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Date</th><th>Supplier</th><th>PO</th><th>Part No</th><th>Part Name</th><th class="num">Boxes</th><th class="num">Qty/box</th><th class="num">Total</th><th>Received</th><th>Status</th><th></th></tr></thead>
+          <tbody id="sch-body"></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- Downloads -->
+    <section id="tab-downloads" hidden>
+      <div class="card">
+        <h2>Label downloads</h2>
+        <p class="hint">Shows which suppliers have printed labels for which delivery date (latest 200).</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>When</th><th>Supplier</th><th>User</th><th>Delivery date</th><th>No SJ</th><th class="num">Labels</th></tr></thead>
+          <tbody id="dl-body"></tbody></table></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/vendor/xlsx.full.min.js"></script>
+  <script src="/common.js"></script>
+  <script>
+    const msg = document.getElementById('msg');
+    const $ = (id) => document.getElementById(id);
+    let suppliers = [], users = [], pendingRows = null;
+
+    (async () => {
+      const me = await api('/api/me');
+      if (me.role !== 'admin') { location.href = '/app.html'; return; }
+      $('who').textContent = me.username;
+      $('f-from').value = todayLocal();
+      await loadSuppliers();
+    })();
+
+    async function guard(fn) {
+      try { showMsg(msg, '', 'ok'); await fn(); } catch (e) { showMsg(msg, e.message, 'err'); }
+    }
+
+    /* tabs */
+    document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll('.tabs button').forEach((x) => x.setAttribute('aria-selected', x === b));
+      ['suppliers', 'upload', 'schedule', 'downloads'].forEach((t) => ($('tab-' + t).hidden = t !== b.dataset.tab));
+      if (b.dataset.tab === 'schedule') guard(loadSchedule);
+      if (b.dataset.tab === 'downloads') guard(loadDownloads);
+    }));
+
+    /* suppliers */
+    async function loadSuppliers() {
+      await guard(async () => {
+        const d = await api('/api/admin/suppliers');
+        suppliers = d.suppliers; users = d.users;
+        const opts = suppliers.map((s) => `<option value="${s.id}">${esc(s.code)} – ${esc(s.name)}</option>`).join('');
+        $('u-supplier').innerHTML = opts;
+        $('f-supplier').innerHTML = '<option value="">All suppliers</option>' + opts;
+        $('sup-body').innerHTML = suppliers.length ? suppliers.map((s) => {
+          const us = users.filter((u) => u.supplier_id === s.id)
+            .map((u) => `${esc(u.username)} <button class="small" data-reset="${u.id}" data-user="${esc(u.username)}">Reset password</button>`).join('<br>') || '<span class="hint">No login yet</span>';
+          return `<tr><td><b>${esc(s.code)}</b></td><td>${esc(s.name)}</td><td>${us}</td>
+            <td><button class="small" data-toggle="${s.id}" data-status="${s.status}">${s.status === 'active' ? 'Active – disable' : 'Disabled – enable'}</button></td></tr>`;
+        }).join('') : '<tr><td colspan="4" class="empty">Add your first supplier above.</td></tr>';
+      });
+    }
+    $('s-add').onclick = () => guard(async () => {
+      await api('/api/admin/suppliers', { method: 'POST', body: { code: $('s-code').value, name: $('s-name').value } });
+      $('s-code').value = ''; $('s-name').value = '';
+      await loadSuppliers();
+      showMsg(msg, 'Supplier added.', 'ok');
+    });
+    $('u-add').onclick = () => guard(async () => {
+      await api('/api/admin/users', { method: 'POST', body: { supplier_id: $('u-supplier').value, username: $('u-name').value, password: $('u-pass').value } });
+      $('u-name').value = ''; $('u-pass').value = '';
+      await loadSuppliers();
+      showMsg(msg, 'Login created. Give the username and password to the supplier.', 'ok');
+    });
+    $('sup-body').addEventListener('click', (e) => {
+      const r = e.target.closest('[data-reset]'), t = e.target.closest('[data-toggle]');
+      if (r) guard(async () => {
+        const pw = prompt(`New password for ${r.dataset.user} (min 8 characters):`);
+        if (!pw) return;
+        await api(`/api/admin/users/${r.dataset.reset}/password`, { method: 'POST', body: { password: pw } });
+        showMsg(msg, 'Password changed. The user was logged out.', 'ok');
+      });
+      if (t) guard(async () => {
+        await api(`/api/admin/suppliers/${t.dataset.toggle}/status`, { method: 'POST', body: { status: t.dataset.status === 'active' ? 'disabled' : 'active' } });
+        await loadSuppliers();
+      });
+    });
+
+    /* upload */
+    $('tpl').onclick = () => {
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['supplier_code', 'delivery_date', 'po_no', 'part_no', 'part_name', 'qty_per_box', 'boxes'],
+        ['XXI', '2026-07-24', 'SWI/200/XI/2026', 'BDG120001(AQ)', 'TONGUE ASSY (AQ)', 150, 2],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+      XLSX.writeFile(wb, 'schedule_template.xlsx');
+    };
+
+    function normDate(v) {
+      if (typeof v === 'number' && isFinite(v)) {            // Excel serial date
+        return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+      }
+      const s = String(v == null ? '' : v).trim();
+      let y, m, d, mt;
+      if ((mt = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) { y = +mt[1]; m = +mt[2]; d = +mt[3]; }
+      else if ((mt = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/))) { d = +mt[1]; m = +mt[2]; y = +mt[3]; }
+      else return '';
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return '';
+      return dt.toISOString().slice(0, 10);
+    }
+
+    $('file').addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      pendingRows = null; $('up-go').hidden = true; $('preview').innerHTML = ''; showMsg($('up-msg'), '', 'ok');
+      if (!f) return;
+      try {
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+        const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+        const rows = [], errors = [];
+        json.forEach((r, i) => {
+          const n = {};
+          Object.keys(r).forEach((k) => (n[String(k).trim().toLowerCase().replace(/\s+/g, '_')] = r[k]));
+          if (Object.values(n).every((v) => String(v).trim() === '')) return;
+          const row = {
+            supplier_code: String(n.supplier_code).trim().toUpperCase(),
+            delivery_date: normDate(n.delivery_date),
+            po_no: String(n.po_no).trim(), part_no: String(n.part_no).trim(), part_name: String(n.part_name).trim(),
+            qty_per_box: Number(n.qty_per_box), boxes: Number(n.boxes),
+          };
+          const bad = [];
+          if (!row.supplier_code) bad.push('supplier_code');
+          if (!row.delivery_date) bad.push('delivery_date');
+          if (!row.po_no || row.po_no.includes(';')) bad.push('po_no');
+          if (!row.part_no || row.part_no.includes(';')) bad.push('part_no');
+          if (!Number.isInteger(row.qty_per_box) || row.qty_per_box < 1) bad.push('qty_per_box');
+          if (!Number.isInteger(row.boxes) || row.boxes < 1) bad.push('boxes');
+          if (bad.length) errors.push(`Row ${i + 2}: check ${bad.join(', ')}`);
+          rows.push(row);
+        });
+        if (!rows.length) return showMsg($('up-msg'), 'No rows found. Use the template columns in the first sheet.', 'err');
+        if (errors.length) return showMsg($('up-msg'), errors.slice(0, 8).join(' · ') + (errors.length > 8 ? ` · and ${errors.length - 8} more` : ''), 'err');
+        pendingRows = rows;
+        const boxes = rows.reduce((n, r) => n + r.boxes, 0);
+        $('preview').innerHTML = `<p class="hint">${rows.length} lines, ${boxes} labels. First rows:</p><div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Date</th><th>PO</th><th>Part No</th><th>Part Name</th><th class="num">Qty/box</th><th class="num">Boxes</th></tr></thead><tbody>` +
+          rows.slice(0, 10).map((r) => `<tr><td>${esc(r.supplier_code)}</td><td>${r.delivery_date}</td><td>${esc(r.po_no)}</td><td>${esc(r.part_no)}</td><td>${esc(r.part_name)}</td><td class="num">${r.qty_per_box}</td><td class="num">${r.boxes}</td></tr>`).join('') + '</tbody></table></div>';
+        $('up-go').hidden = false;
+      } catch (err) {
+        showMsg($('up-msg'), 'Could not read that file. Use the .xlsx template.', 'err');
+      }
+    });
+    $('up-go').onclick = async () => {
+      $('up-go').disabled = true;
+      try {
+        const r = await api('/api/admin/schedule/upload', { method: 'POST', body: { rows: pendingRows } });
+        showMsg($('up-msg'), `Uploaded ${r.inserted} lines for ${r.dates} supplier-date combination(s).`, 'ok');
+        $('up-go').hidden = true; $('preview').innerHTML = ''; $('file').value = ''; pendingRows = null;
+      } catch (err) { showMsg($('up-msg'), err.message, 'err'); }
+      $('up-go').disabled = false;
+    };
+
+    /* schedule & receiving */
+    async function loadSchedule() {
+      const q = new URLSearchParams();
+      if ($('f-from').value) q.set('from', $('f-from').value);
+      if ($('f-supplier').value) q.set('supplier_id', $('f-supplier').value);
+      const d = await api('/api/admin/schedule?' + q);
+      $('sch-body').innerHTML = d.lines.length ? d.lines.map((l) => {
+        const total = l.qty_per_box * l.boxes;
+        return `<tr><td>${l.delivery_date}</td><td>${esc(l.supplier_code)}</td><td>${esc(l.po_no)}</td><td>${esc(l.part_no)}</td><td>${esc(l.part_name)}</td>
+          <td class="num">${l.boxes}</td><td class="num">${l.qty_per_box}</td><td class="num">${total}</td>
+          <td><input class="qty" type="number" min="0" value="${l.status === 'scheduled' ? '' : l.qty_received}" placeholder="–" id="rq-${l.id}"></td>
+          <td><span class="badge ${l.status}">${l.status}</span></td>
+          <td><button class="small" data-save="${l.id}">Save</button> <button class="small danger" data-del="${l.id}">Delete</button></td></tr>`;
+      }).join('') : '<tr><td colspan="11" class="empty">No schedule lines for this filter.</td></tr>';
+    }
+    $('f-go').onclick = () => guard(loadSchedule);
+    $('sch-body').addEventListener('click', (e) => {
+      const s = e.target.closest('[data-save]'), x = e.target.closest('[data-del]');
+      if (s) guard(async () => {
+        await api(`/api/admin/lines/${s.dataset.save}/receive`, { method: 'POST', body: { qty_received: $('rq-' + s.dataset.save).value } });
+        await loadSchedule();
+        showMsg(msg, 'Saved.', 'ok');
+      });
+      if (x) guard(async () => {
+        if (!confirm('Delete this schedule line?')) return;
+        await api(`/api/admin/lines/${x.dataset.del}`, { method: 'DELETE' });
+        await loadSchedule();
+      });
+    });
+
+    /* downloads */
+    async function loadDownloads() {
+      const d = await api('/api/admin/downloads');
+      $('dl-body').innerHTML = d.downloads.length ? d.downloads.map((r) =>
+        `<tr><td>${esc(fmtDateTime(r.downloaded_at))}</td><td>${esc(r.supplier_code)}</td><td>${esc(r.username)}</td><td>${r.delivery_date}</td><td>${esc(r.sj_no || '–')}</td><td class="num">${r.labels_count}</td></tr>`
+      ).join('') : '<tr><td colspan="6" class="empty">No labels downloaded yet.</td></tr>';
+    }
+  </script>
+</body>
+</html>
