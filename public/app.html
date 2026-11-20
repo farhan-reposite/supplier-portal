@@ -3,109 +3,62 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Supplier Portal – Schedule</title>
+  <title>Delivery schedule · Supplier Portal</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="topbar">
-    <strong>Supplier Portal</strong>
-    <span><span class="who" id="who"></span> &nbsp; <button class="small" onclick="logout()">Log out</button></span>
-  </div>
+  <header id="topbar"></header>
   <main>
-    <h1>Delivery schedule</h1>
-    <p class="hint">Download the labels for a delivery date, print them, and stick one on each box.</p>
+    <div class="page-head">
+      <div>
+        <h1 id="title">Delivery schedule</h1>
+       </div>
+    </div>
 
-    <details class="guide card">
-      <summary>How to print the labels on the POS-80 printer</summary>
+    <details class="guide card" style="margin-bottom:16px">
+      <summary>How to print on the POS-80 printer</summary>
       <ol>
-        <li>Fill in the <b>No SJ</b> (delivery note number) for that date. If you leave it empty, the label prints “Road Number”.</li>
-        <li>Press <b>Download labels</b>. You get one PDF with one label per box (80 mm wide).</li>
-        <li>Open the PDF in Chrome and press Ctrl+P. Choose the POS-80 printer.</li>
-        <li>Set paper size to 80 mm × 80 mm (or the size set up in the printer), margins to <b>None</b>, and scale to <b>100% / Actual size</b>.</li>
-        <li>Print, then check that every label is complete and not smudged. You can download the same labels again at any time.</li>
+        <li>Pick one or more dates in the calendar. Dates with deliveries show the number of boxes.</li>
+        <li>Type the <b>No SJ</b> (delivery note number) for each date. If you leave it empty, the label prints “Road Number”.</li>
+        <li>Press <b>Print labels</b>. The labels go straight to the POS-80 printer at the exact label size, with no print window. The first time on a computer you choose the printer; the <b>Printer</b> button changes it later.</li>
+        <li>This needs the <b>QZ Tray</b> app running on the computer that has the printer. If it is not running, you are offered the normal browser print window instead (the label size may not match).</li>
+        <li>Prefer a file? <b>Download PDF</b> gives the same labels, one per page.</li>
+        <li>A label damaged? Select the date again, untick other parts, set the box range (for example 3 to 3), and print just that label.</li>
       </ol>
     </details>
 
-    <div id="msg" class="msg err" hidden></div>
-    <div id="list"><p class="empty">Loading…</p></div>
+    <div id="owed"></div>
+
+    <div class="layout">
+      <section class="card" aria-label="Calendar">
+        <div class="cal-head">
+          <button class="icon ghost" id="prev" aria-label="Previous month"></button>
+          <div class="t"><select id="monthsel" aria-label="Month"></select></div>
+          <button class="icon ghost" id="next" aria-label="Next month"></button>
+        </div>
+        <div class="cal" id="cal"></div>
+        <div class="cal-foot">
+          <button class="sm" id="q-today" data-icon="calendar">Today</button>
+          <button class="sm" id="q-next" data-icon="arrow">Next delivery</button>
+          <button class="sm ghost" id="q-clear" data-icon="close">Clear</button>
+        </div>
+        <div class="legend" style="padding:0 14px 14px">
+          <span><i class="r" style="background:var(--ok);border-radius:50%;width:9px;height:9px"></i>Received</span>
+          <span><i class="s" style="background:var(--warn);border-radius:50%;width:9px;height:9px"></i>Shortage</span>
+          <span><i class="l" style="background:var(--bad);border-radius:50%;width:9px;height:9px"></i>Not received</span>
+        </div>
+      </section>
+
+      <section id="panel" aria-label="Labels to print"></section>
+    </div>
   </main>
 
   <script src="/vendor/jspdf.umd.min.js"></script>
   <script src="/vendor/qrcode.js"></script>
+  <script src="/vendor/qz-tray.js"></script>
   <script src="/common.js"></script>
   <script src="/labels.js"></script>
-  <script>
-    const msg = document.getElementById('msg');
-    let supplierCode = '';
-
-    (async () => {
-      const me = await api('/api/me');
-      if (me.role === 'admin') { location.href = '/admin.html'; return; }
-      document.getElementById('who').textContent = `${me.supplier_name} (${me.supplier_code}) · ${me.username}`;
-      load();
-    })();
-
-    async function load() {
-      try {
-        const d = await api('/api/schedule');
-        supplierCode = d.supplier.code;
-        render(d.lines);
-      } catch (e) { showMsg(msg, e.message, 'err'); }
-    }
-
-    function render(lines) {
-      const list = document.getElementById('list');
-      if (!lines.length) { list.innerHTML = '<p class="empty">No deliveries are scheduled yet.</p>'; return; }
-      const byDate = {};
-      lines.forEach((l) => (byDate[l.delivery_date] = byDate[l.delivery_date] || []).push(l));
-      const today = todayLocal();
-      list.innerHTML = Object.keys(byDate).sort().map((date) => {
-        const rows = byDate[date];
-        const boxes = rows.reduce((n, r) => n + r.boxes, 0);
-        const past = date < today ? ' <span class="badge">past</span>' : (date === today ? ' <span class="badge received">today</span>' : '');
-        const body = rows.map((r) => {
-          const total = r.qty_per_box * r.boxes;
-          const short = r.status === 'scheduled' ? '' : Math.max(0, total - r.qty_received);
-          return `<tr>
-            <td>${esc(r.po_no)}</td><td>${esc(r.part_no)}</td><td>${esc(r.part_name)}</td>
-            <td class="num">${r.boxes}</td><td class="num">${r.qty_per_box}</td><td class="num">${total}</td>
-            <td class="num">${r.status === 'scheduled' ? '–' : r.qty_received}</td>
-            <td class="num">${short ? `<span class="shortage-text">${short}</span>` : (r.status === 'scheduled' ? '–' : '0')}</td>
-            <td><span class="badge ${r.status}">${esc(r.status)}</span></td></tr>`;
-        }).join('');
-        return `<section class="card">
-          <div class="card-head">
-            <h2>${esc(fmtDate(date))}${past}</h2>
-            <div class="row" style="align-items:flex-end;flex:0 1 auto">
-              <div class="sj-field"><label for="sj-${esc(date)}">No SJ (optional)</label>
-                <input id="sj-${esc(date)}" maxlength="40" placeholder="Delivery note number"></div>
-              <div class="fit"><button class="primary" data-date="${esc(date)}">Download labels (${boxes})</button></div>
-            </div>
-          </div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>PO</th><th>Part No</th><th>Part Name</th><th class="num">Boxes</th><th class="num">Qty/box</th><th class="num">Total</th><th class="num">Received</th><th class="num">Shortage</th><th>Status</th></tr></thead>
-            <tbody>${body}</tbody></table></div>
-        </section>`;
-      }).join('');
-    }
-
-    document.getElementById('list').addEventListener('click', async (e) => {
-      const btn = e.target.closest('button[data-date]');
-      if (!btn) return;
-      const date = btn.dataset.date;
-      const label = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Preparing…';
-      try {
-        const data = await api('/api/labels', { method: 'POST', body: { date, sj: document.getElementById('sj-' + date).value } });
-        buildLabelsPdf(data).save(`labels_${supplierCode}_${date}.pdf`);
-        showMsg(msg, '', 'ok');
-      } catch (err) {
-        showMsg(msg, err.message, 'err');
-      }
-      btn.disabled = false;
-      btn.textContent = label;
-    });
-  </script>
+  <script src="/direct-print.js"></script>
+  <script src="/supplier.js"></script>
 </body>
 </html>

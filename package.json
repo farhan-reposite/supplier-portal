@@ -7,12 +7,16 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 execute supplier-portal-db --local --file=schema.sql",
-    "db:remote": "wrangler d1 execute supplier-portal-db --remote --file=schema.sql"
+    "db:remote": "wrangler d1 execute supplier-portal-db --remote --file=schema.sql",
+    "migrate:001": "wrangler d1 execute supplier-portal-db --remote --file=migrations/001_monthly_import.sql",
+    "backup": "wrangler d1 export supplier-portal-db --remote --output=backup.sql",
+    "qz:cert": "node scripts/make-qz-cert.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0"
   },
   "devDependencies": {
+    "selfsigned": "^2.4.1",
     "wrangler": "^4.0.0"
   }
 }

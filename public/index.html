@@ -3,37 +3,56 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Supplier Portal – Log in</title>
+  <title>Log in · Supplier Portal</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main class="login">
-    <h1>Supplier Portal</h1>
-    <p class="hint">Log in to see your delivery schedule and download box labels.</p>
-    <div class="card">
-      <form id="form">
-        <div><label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" required></div>
-        <div><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required></div>
-        <div id="msg" class="msg err" hidden></div>
-        <button class="primary" style="width:100%" id="btn">Log in</button>
-      </form>
+  <div class="login-wrap">
+    <div class="login">
+      <div class="login-brand">
+        <a class="brand" href="/" aria-label="Home">
+          <img src="/logo.png" alt="Company logo" onerror="this.style.display='none'">
+        </a>
+        <div class="portal-title">Supplier Portal</div>
+        <p class="portal-sub">Delivery schedule and box labels</p>
+      </div>
+      <div class="card">
+        <h1>Log in</h1>
+        <p class="muted small" style="margin-bottom:18px">Sign in to see your delivery schedule and print box labels.</p>
+        <form id="form" novalidate>
+          <div id="err" class="err-text" role="alert" hidden></div>
+          <div><label class="field" for="u">Username</label>
+            <input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+          <div><label class="field" for="p">Password</label>
+            <div class="pw"><input id="p" type="password" autocomplete="current-password" required>
+              <button type="button" id="show" aria-label="Show password" data-icon="eye"></button></div></div>
+          <button class="primary" style="width:100%" id="btn" data-icon="login">Log in</button>
+        </form>
+      </div>
+      <p class="muted small" style="text-align:center;margin-top:14px">Forgot your password? Ask the warehouse to reset it.</p>
     </div>
-  </main>
+  </div>
   <script src="/common.js"></script>
   <script>
-    const go = (role) => { location.href = role === 'admin' ? '/admin.html' : '/app.html'; };
+    const go = (role) => { location.href = role === 'admin' ? '/admin#schedule' : '/app'; };
     api('/api/me', { noRedirect: true }).then((me) => go(me.role)).catch(() => {});
-    document.getElementById('form').addEventListener('submit', async (e) => {
+    $('show').onclick = () => {
+      const p = $('p'); const show = p.type === 'password';
+      p.type = show ? 'text' : 'password';
+      $('show').innerHTML = show ? ICON.eyeoff : ICON.eye;
+      $('show').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    };
+    $('form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const btn = document.getElementById('btn');
-      btn.disabled = true;
+      const btn = $('btn'); const err = $('err');
+      if (!$('u').value.trim() || !$('p').value) { err.textContent = 'Enter your username and password'; err.hidden = false; return; }
+      btn.disabled = true; btn.innerHTML = '<span class="spin" style="border-top-color:#fff"></span> Logging in…'; err.hidden = true;
       try {
-        const r = await api('/api/login', { method: 'POST', noRedirect: true,
-          body: { username: document.getElementById('u').value, password: document.getElementById('p').value } });
+        const r = await api('/api/login', { method: 'POST', noRedirect: true, body: { username: $('u').value, password: $('p').value } });
         go(r.role);
-      } catch (err) {
-        showMsg(document.getElementById('msg'), err.message, 'err');
-        btn.disabled = false;
+      } catch (ex) {
+        err.textContent = ex.message; err.hidden = false;
+        btn.disabled = false; btn.innerHTML = ICON.login + ' Log in'; $('p').select();
       }
     });
   </script>

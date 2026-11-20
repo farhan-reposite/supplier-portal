@@ -29,13 +29,17 @@ CREATE TABLE IF NOT EXISTS schedule_lines (
   po_no         TEXT NOT NULL,
   part_no       TEXT NOT NULL,
   part_name     TEXT NOT NULL DEFAULT '',
-  qty_per_box   INTEGER NOT NULL,
-  boxes         INTEGER NOT NULL,
+  qty_per_box   INTEGER NOT NULL,         -- lot size (column H in the PO file)
+  boxes         INTEGER NOT NULL,         -- ceil(qty_total / qty_per_box)
+  qty_total     INTEGER NOT NULL DEFAULT 0, -- scheduled pieces for this date
+  row_no        INTEGER NOT NULL DEFAULT 0, -- row order in the Excel file
   qty_received  INTEGER NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled | received | shortage
   created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_lines_supplier_date ON schedule_lines(supplier_id, delivery_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lines_key ON schedule_lines(supplier_id, delivery_date, po_no, part_no);
+CREATE INDEX IF NOT EXISTS idx_lines_date ON schedule_lines(delivery_date);
 
 CREATE TABLE IF NOT EXISTS download_log (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,3 +50,5 @@ CREATE TABLE IF NOT EXISTS download_log (
   labels_count  INTEGER NOT NULL DEFAULT 0,
   downloaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_log_supplier_date ON download_log(supplier_id, delivery_date);
